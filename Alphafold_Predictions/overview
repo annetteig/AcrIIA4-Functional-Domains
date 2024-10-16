@@ -1,0 +1,58 @@
+
+
+
+#generate all deletions
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+from Bio import SeqIO
+
+# original sequence of acr2a4
+original_seq = "MNINDLIREIKNKDYTVKLSGTDSNSITQLIIRVNNDGNEYVISESENESIVEKFISAFKNGWNQEYEDEEEFYNDMQTITLKSELN"
+
+# function to generate all possible sequences with `n` consecutive deletions
+def generate_deletions(seq, n):
+    deletions = []
+    seq_len = len(seq)
+    for i in range(seq_len - n + 1):
+        new_seq = seq[:i] + seq[i+n:]
+        deletions.append((new_seq, i, i + n - 1, n))
+    return deletions
+
+# write each sequence to fasta
+def write_to_fasta(sequences, concatenated_fasta_file, deletion_size):
+    with open(concatenated_fasta_file, "a") as output_handle:  
+        for idx, (seq, start, end, length) in enumerate(sequences):
+            header = f"start {start+1} end {end+1} length {length}"
+            record = SeqRecord(Seq(seq), id="", description=header)
+            SeqIO.write(record, output_handle, "fasta")
+
+# define the concatenated output file
+concatenated_fasta_file = "all_deletions.fasta"
+
+# generate deletions of size 0 to 10
+for n in range(0, 11):
+    if n == 0:
+        # No deletions case, just write the original sequence
+        write_to_fasta([(original_seq, 0, 0, 0)], concatenated_fasta_file, n)
+    else:
+        deletion_sequences = generate_deletions(original_seq, n)
+        write_to_fasta(deletion_sequences, concatenated_fasta_file, n)
+
+
+
+#on interactive node (used mem=128G, 16 cpus/task, scratch = 100), loaded colabfold
+module load colabfold
+
+#run colabfold on all_deletions.fasta file
+colabfold_search --threads $SLURM_CPUS_PER_TASK \
+   all_deletions.fasta $COLABFOLD_DB acr_msa
+
+#on interactive node with gpu (gpu:a100:1), generate models
+colabfold_batch --amber --use-gpu-relax      acr_msa acr_models
+
+#then use foldx to estimate stability
+foldx.sh
+
+#to concatenate all foldx .fxout files:
+for file in *.fxout; do sed ':a;N;$!ba;s/\n/ /g' "$file"; echo ""; done > all_results.txt
+
